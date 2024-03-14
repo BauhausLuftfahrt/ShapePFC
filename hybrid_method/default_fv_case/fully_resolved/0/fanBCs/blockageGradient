@@ -1,0 +1,157 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2206                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+version 2.0;
+format ascii ;
+class volVectorField ;
+location "0";
+object blockageGradient;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+dimensions [0 -1 0 0 0 0 0];
+internalField #codeStream
+{
+codeInclude
+#{
+# include "fvCFD.H"
+# include <IFstream.H>
+# include <OFstream.H>
+# include <ctime>
+# include "clock.H"
+# include "string.H"
+# include <sstream>
+# include <iomanip>
+# include <cmath>
+# include <iostream>
+# include <vector>
+# include "Python.h"
+# include "pybind11/pybind11.h"
+# include "pybind11/eval.h"
+# include "pybind11/embed.h"
+# include "pybind11/numpy.h"
+# include "pybind11/stl.h"
+#};
+codeOptions
+#{
+-Wno-old-style-cast \
+-I$(LIB_SRC)/finiteVolume/lnInclude \
+-I$(LIB_SRC)/meshTools/lnInclude \
+-I//home/anais/.local/lib/python3.5/site-packages/pybind11/include \
+-I/usr/include/python3.5m
+#};
+codeLibs
+#{
+-lmeshTools \
+-lfiniteVolume \
+-lpython3.5m 
+#};
+code
+#{
+const IOdictionary & d = static_cast < const IOdictionary &>(dict);
+const fvMesh& mesh = refCast < const fvMesh >(d.db());
+label fanZoneID = mesh.cellZones().findZoneID("fan");
+const labelList& fanCells = mesh.cellZones()[fanZoneID];
+scalar y, z, RADIUS;
+vectorField blockageGradient(mesh.nCells() , vector(0,0,0));
+List <vector > gradx_data , grady_data , gradz_data;
+IFstream gradx("blockage_gradient_x");
+gradx >> gradx_data;
+IFstream gradz("blockage_gradient_z");
+gradz >> gradz_data;
+
+const vectorField& C = mesh.C();
+const Foam::Vector<scalar>* CData = C.cdata();
+const long CAddress = reinterpret_cast<long>(CData);
+
+std::vector<double> x_orig_x;
+std::vector<double> z_orig_x;
+std::vector<double> x_orig_z;
+std::vector<double> z_orig_z;
+std::vector<double> bl_gradx_orig;
+std::vector<double> bl_gradz_orig;
+
+for (int i = 0; i < gradx_data.size(); i++) {
+	x_orig_x.push_back(gradx_data[i][0]);
+        z_orig_x.push_back(gradx_data[i][1]);
+        bl_gradx_orig.push_back(gradx_data[i][2]);
+}
+
+for (int i = 0; i < gradz_data.size(); i++) {
+	x_orig_z.push_back(gradz_data[i][0]);
+        z_orig_z.push_back(gradz_data[i][1]);
+        bl_gradz_orig.push_back(gradz_data[i][2]);
+}
+
+namespace py = pybind11;
+using namespace pybind11::literals;
+py::object scope_ = py::module_::import("__main__").attr("__dict__");
+py::eval_file("python_funs.py", scope_);
+scope_["CAddress"] = CAddress;
+scope_["SIZE"] = C.size();
+py::array_t<double> bl_gradx_orig_py(bl_gradx_orig.size(), bl_gradx_orig.data());
+py::array_t<double> bl_gradz_orig_py(bl_gradz_orig.size(), bl_gradz_orig.data());
+
+scope_["x_orig_1"] = x_orig_x;
+scope_["y_orig_1"] = z_orig_x;
+scope_["x_orig_2"] = x_orig_z;
+scope_["y_orig_2"] = z_orig_z;
+scope_["z_orig_1"] = bl_gradx_orig;
+scope_["z_orig_2"] = bl_gradz_orig;
+scope_["fillv"] = 0.0;
+
+py::exec("gradx_py = interp_lin2d(x_orig_1, y_orig_1, z_orig_1, fillv)", scope_);
+py::array_t<double> bl_gradx_py_arr = scope_["gradx_py"].cast<py::array_t<double>>();
+auto gradx_py = bl_gradx_py_arr.data();
+
+py::exec("gradz_py = interp_lin2d(x_orig_2, y_orig_2, z_orig_2, fillv)", scope_);
+py::array_t<double> bl_gradz_py_arr = scope_["gradz_py"].cast<py::array_t<double>>();
+auto gradz_py = bl_gradz_py_arr.data();
+
+forAll(blockageGradient, i)
+{
+y = mesh.C()[i][1];
+z = mesh.C()[i][2];
+RADIUS = sqrt(y*y + z*z);
+if (std::find(fanCells.begin(), fanCells.end(), i) != fanCells.end()) {
+	blockageGradient[i] = vector(gradx_py[i], 0.0, gradz_py[i]*RADIUS);
+}
+else{			
+	blockageGradient[i] = vector(0.0 , 0.0 , 0.0);
+}
+}
+
+blockageGradient.writeEntry("", os);
+//py::finalize_interpreter();
+#};
+};
+boundaryField
+{
+"nac_.*"
+{
+type zeroGradient;
+}
+"fuse_.*"
+{
+type zeroGradient;
+}
+"(inlet|atmosphere)"
+{
+type zeroGradient;
+}
+outlet
+{
+type zeroGradient ;
+}
+"(wedge_left|wedge_right)"
+{
+type            wedge;
+}
+}
+
+// ************************************************************************* //

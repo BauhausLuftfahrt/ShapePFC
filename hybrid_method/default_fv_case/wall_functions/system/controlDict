@@ -1,0 +1,401 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  1.7.1                                 |
+|   \\  /    A nd           | Web:      http://www.openfoam.org               |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+
+FoamFile
+{
+    version         2.0;
+    format          ascii;
+    class           dictionary;
+    location        "system";
+    object          controlDict;
+}
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "include/controlvars"
+#include "include/samplevars"
+
+application       hisa;
+
+startFrom         latestTime;
+
+startTime         $starttime;
+
+stopAt            endTime;
+
+endTime           $endtime; 
+
+deltaT            1; 
+
+writeControl      timeStep;            
+
+writeInterval     $writeinterval;               
+
+purgeWrite        3;
+
+writeFormat       binary;
+
+writePrecision    12;
+
+writeCompression  off;
+
+timeFormat        general;
+
+timePrecision     6;
+
+graphFormat       raw;
+
+runTimeModifiable yes;
+
+functionObjectLibs ("libfieldFunctionObjects.so");
+
+functions
+{
+
+turbulenceFields
+{
+    type            turbulenceFields;
+    libs            (fieldFunctionObjects);
+    fields          (R devRhoReff L muEff);
+    timeStart       $starttime;
+    timeEnd         $endtime;
+    executeControl  timeStep;
+    executeInterval 1;
+    writeControl    timeStep;
+    writeInterval   $writeinterval;
+}
+MachNo1
+{
+    type            MachNo;
+    libs            (fieldFunctionObjects);
+    timeStart       $starttime;
+    timeEnd         $endtime;
+    executeControl  timeStep;
+    executeInterval 1;
+    writeControl    timeStep;
+    writeInterval   $writeinterval;
+}
+
+volFieldValue
+{
+    type            writeObjects;
+    libs            (utilityFunctionObjects);
+    fields          (rhoR rhoU rhoE);
+    writeToFile     true;
+    timeStart       $starttime;
+    timeEnd         $endtime;
+    executeControl  timeStep;
+    executeInterval 1;
+    writeControl    timeStep;
+    writeInterval   $writeinterval;
+}
+
+ wallShearStress 
+  {
+    type wallShearStress;
+    libs
+      (
+        "libfieldFunctionObjects.so"
+      );
+    writeControl writeTime;
+    patches
+      (
+	nac_cowling
+	nac_inlet
+	nac_rotor
+	nac_gap
+	nac_stator
+	nac_nozzle
+	fuse_center
+	fuse_sweep
+	fuse_hub_inlet
+	fuse_hub_rotor
+	fuse_hub_gap
+	fuse_hub_stator
+	fuse_hub_nozzle
+	fuse_tail
+      );
+   }
+
+ nac_cowling
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;    
+     
+    patches           
+	  (
+	nac_cowling
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    nac_inlet
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;
+    patches           
+	  (
+	nac_inlet
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+   
+    nac_tip_fan
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;   
+    patches           
+	  (
+	nac_rotor
+	nac_gap
+	nac_stator
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    nac_nozzle
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime; 
+    patches           
+	  (
+	nac_nozzle
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    fuse_center
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;
+    patches           
+	  (
+	fuse_center
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    fuse_sweep
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;
+    patches           
+	  (
+	fuse_sweep
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    fuse_hub_inlet
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;
+    patches           
+	  (
+	fuse_hub_inlet
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    fuse_hub_fan
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;
+    patches           
+	  (
+	fuse_hub_rotor
+	fuse_hub_gap
+	fuse_hub_stator
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    fuse_hub_nozzle
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;         
+    patches           
+	  (
+	fuse_hub_nozzle
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+    fuse_tail
+ {
+    type                forces;
+    libs  ("libforces.so");
+    writeControl        writeTime;
+    executeControl     writeTime;         
+    patches           
+	  (
+	fuse_tail
+	  );
+    pName               pInf;
+    UName               UInf;
+    rhoName             rhoInf;     
+    CofR                (0 0 0);     
+    rhoInf $rho;
+   }
+   
+yPlus
+{
+    type            yPlus;
+    libs            (fieldFunctionObjects);
+    writeToFile     true;
+    timeStart       $starttime;
+    timeEnd         $endtime;
+    executeControl  timeStep;
+    executeInterval 1;
+    writeControl    timeStep;
+    writeInterval   $writeinterval;
+}
+
+samples
+{
+libs ("libsampling.so");
+type    	sets;
+executeControl	timeStep;
+executeInterval	1;
+writeControl	timeStep;
+writeInterval	$writeinterval;
+interpolationScheme	cellPatchConstrained;
+setFormat		csv;
+fields
+(
+U
+Ma
+p
+T
+rho
+rhoU
+);
+
+sets
+(
+ff_inlet
+{
+type				midPoint;	
+axis				z;
+start				($x1 0.0 $z11);
+end				($x1 0.0 $z12);
+}
+ff_throat
+{
+type				midPoint;	
+axis				z;
+start				($x2 0.0 $z21);
+end				($x2 0.0 $z22);
+}
+rotor_inlet
+{
+type				midPoint;	
+axis				z;
+start				($x3 0.0 $z31);
+end				($x3 0.0 $z32);
+}
+stator_outlet
+{
+type				midPoint;	
+axis				z;
+start				($x5 0.0 $z51);
+end				($x5 0.0 $z52);
+}
+ff_outlet
+{
+type				midPoint;	
+axis				z;
+start				($x6 0.0 $z61);
+end				($x6 0.0 $z62);
+}
+bl_wake
+{
+type				midPoint;
+axis				z;
+start				($x7 0.0 0);
+end				($x7 0.0 $z72);
+}
+bl_front
+{
+type				midPoint;
+axis				z;
+start				($x8 0.0 $z11);
+end				($x8 0.0 $z72);
+}
+bl_ff_outlet
+{
+type				midPoint;
+axis				z;
+start				($x6 0.0 $z61);
+end				($x6 0.0 $z72);
+}
+bl_ff_inlet
+{
+type				midPoint;
+axis				z;
+start				($x1 0.0 $z11);
+end				($x1 0.0 $z72);
+}
+bl_fuse_te
+{
+type				midPoint;
+axis				z;
+start				($x9 0.0 0);
+end				($x9 0.0 $z72);
+}
+);
+}
+}
+
+// ************************************************************************* //

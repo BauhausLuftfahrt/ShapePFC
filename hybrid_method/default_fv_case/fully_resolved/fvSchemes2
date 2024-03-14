@@ -1,0 +1,76 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|                                                                             |
+|    HiSA: High Speed Aerodynamic solver                                      |
+|    Copyright (C) 2014-2017 Johan Heyns - CSIR, South Africa                 |
+|    Copyright (C) 2014-2017 Oliver Oxtoby - CSIR, South Africa               |
+|                                                                             |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      fvSchemes;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+fluxScheme           AUSMPlusUp;
+
+ddtSchemes
+{
+    default          bounded dualTime rPseudoDeltaT steadyState;
+}
+
+gradSchemes
+{
+    default	     faceLeastSquares linear; 
+    grad(k)          cellLimited Gauss linear 0.1; 
+    grad(omega)      cellLimited Gauss linear 0.1; 
+    grad(nuTilda)    cellLimited Gauss linear 0.1; 
+    grad(U)	     cellLimited<cubic> 1.5 Gauss linear 1; 
+    grad(p) 	     Gauss linear 0.333; 
+    grad(T) 	     cellLimited faceLeastSquares linear 0.9; 
+    
+}
+
+divSchemes
+{
+    default          	none;
+    div(tauMC)       	Gauss linear;
+    div(phi,nuTilda)    Gauss linear; 
+    div(phi,omega)   	Gauss limitedLinear 1;//linear; 
+    div(phi,k)   	Gauss limitedLinear 1;//linear;  
+}
+
+laplacianSchemes
+{
+    default                     Gauss linear limited 0.5;//Gauss linear corrected; 
+    laplacian(muEff,U)          Gauss linear compact;
+    laplacian(alphaEff,e)       Gauss linear compact;
+    laplacian(yPsi)		Gauss linear corrected;
+}
+
+interpolationSchemes
+{
+    default          linear;
+    reconstruct(rho) wVanLeer;
+    reconstruct(U)   wVanLeer;
+    reconstruct(T)   wVanLeer;
+}
+
+snGradSchemes
+{
+    default          limited 1;//corrected;
+}
+
+wallDist
+{
+ //method meshWave;
+    method Poisson;
+}
+
+
+
+// ************************************************************************* //

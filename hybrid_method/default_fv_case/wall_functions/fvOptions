@@ -1,0 +1,544 @@
+/*--------------------------------*- C++ -*----------------------------------* \
+  | =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2206                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+version     2.0;
+format      ascii;
+class       dictionary;
+object      fvOptions;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Body force model acc. to Hall-Thollet
+// 1) Energy equation
+fanEnergy
+{
+type scalarCodedSource;
+active true;
+name tholletBFMe;
+scalarCodedSourceCoeffs
+{
+selectionMode cellZone;
+cellZone fan;
+fields (e);
+codeInclude
+#{
+# include <cmath>
+# include <IFstream.H>
+# include <OFstream.H>
+# include <vector>
+# include "fvc.H"
+#};
+codeCorrect
+#{
+#};
+codeAddSup
+#{
+#};
+codeAddSupRho
+#{
+Pout << "Adding source terms to energy equation for zones: ";
+// define if rotor and/or stator zones are present
+bool rotor {true};
+bool stator {true};
+
+// define constants
+
+
+
+
+const scalar NROT = 20; // number of rotor blades [-]
+const scalar PI = M_PI; // pi
+
+// read fields
+volVectorField F = mesh_.lookupObject<volVectorField>("F");
+const volVectorField& U = mesh_.lookupObject<volVectorField>("U");
+const volScalarField& rhoE = mesh_.lookupObject<volScalarField>("rhoE");
+const volVectorField& rhoU = mesh_.lookupObject<volVectorField>("rhoU");
+const volVectorField& camber = mesh_.lookupObject<volVectorField>("camber");
+const volScalarField& blockage = mesh_.lookupObject<volScalarField>("blockage");
+const volVectorField& gradBlockage = mesh_.lookupObject<volVectorField>("blockageGradient");
+const volScalarField& mu = mesh_.lookupObject<volScalarField>("thermo:mu");
+const volScalarField& et = mesh_.lookupObject<volScalarField>("eZero");
+const volScalarField& T = mesh_.lookupObject<volScalarField>("T");
+const vectorField& CC = mesh_.C(); //cell center
+const Foam::Vector<scalar>* CData = CC.cdata();
+const long CAddress = reinterpret_cast<long>(CData);
+
+
+// initialize source term field
+volScalarField FTOTAL = mesh_.lookupObject<volScalarField>("rhoER");
+FTOTAL *= 0.0;
+
+// Initialize scalars
+scalar ht, FB, FBFM, RADIUS ,OMEGARROT, NX , NY ,NZ , WX ,WY ,WZ ,WMAG , WDOTN ,WNX ,WNY ,WNZ , DEVLOC ,WTX ,WTY ,WTZ ,WTMAG ,TY ,FN ,FY, FP, MACHREL, KMACH, CF, DELTA, REX, WPX, WPY, WPZ, WPMAG, x_le_rot, x_le_stat;
+
+scalar gamma, FY2;
+
+// calculate source terms for stator cell zone
+if (stator) {
+Pout << "stator "; 
+label statorZoneID = mesh_.cellZones().findZoneID("stator");
+const labelList& statorCells = mesh_.cellZones()[statorZoneID];
+forAll(statorCells,i)
+{
+// calculate total specific enthalpy
+ht = 1004.5*T[statorCells[i]]+pow(mag(U[statorCells[i]]),2)/2;
+// metal blockage effect
+FB = 1/blockage[statorCells[i]]*(rho[statorCells[i]]*et[statorCells[i]]*U[statorCells[i]]&gradBlockage[statorCells[i]]);
+// total energy source term. body force is zero for stator (OMEGASTAT = 0)
+FTOTAL[statorCells[i]] = FB;
+if (FTOTAL[statorCells[i]] > 1e10){
+	FTOTAL[statorCells[i]] = 1e10;
+}
+}
+}
+
+// calculate source terms for rotor cell zone
+if (rotor) {
+Pout << "rotor " << endl; 
+label rotorZoneID = mesh_.cellZones().findZoneID("rotor");
+const labelList& rotorCells = mesh_.cellZones()[rotorZoneID];
+forAll(rotorCells ,i)
+{
+// calculate rotor angular velocity [m/s]
+RADIUS = sqrt(pow(CC[rotorCells[i]].y(),2)+pow(CC[rotorCells[i]].z(),2));
+OMEGARROT = OMEGAROT * RADIUS ;
+// get camber normal vector
+NX = camber[rotorCells[i]].x();
+NY = camber[rotorCells[i]].y();
+NZ = camber[rotorCells[i]].z();
+// calculate rotor relative velocity [m/s]
+WX= U[rotorCells[i]].x();
+WY= U[rotorCells[i]].y() - OMEGARROT;
+WZ= U[rotorCells[i]].z();
+WMAG = sqrt(WX*WX + WY*WY + WZ*WZ);
+// calculate total specific enthalpy [m/s]
+ht = 1004.5*T[rotorCells[i]]+pow(mag(U[rotorCells[i]]),2)/2;
+//Pout << "U " << U[rotorCells[i]] << "rhoU " << rhoU[rotorCells[i]] << "rho " << rho[rotorCells[i]] << endl; 
+//Pout << "thermo.he " << he[rotorCells[i]] << "ht " << ht << endl; 
+// calculcate relative Mach number
+MACHREL = std::abs(WMAG)/sos;
+// calculate compressibility correction factor [-]
+if (MACHREL < 1){
+    KMACH = min(1/sqrt(1-MACHREL*MACHREL),3);
+} else if (MACHREL > 1){
+KMACH = min(4/(2*PI*sqrt(MACHREL*MACHREL-1)),3);
+} else {
+KMACH = 3;
+}
+if (KMACH > 3){
+KMACH = 3;
+}
+// calculate local deviation angle [rad]
+WDOTN = WX*NX + WY*NY + WZ*NZ;
+WNX = WDOTN *NX;
+WNY = WDOTN *NY;
+WNZ = WDOTN *NZ;
+DEVLOC = 0.0;
+if (std::abs(WDOTN/WMAG) < 1){
+	DEVLOC = asin( WDOTN / max(WMAG ,1e-9));
+} else if ((WDOTN/WMAG) < -1){
+	DEVLOC = asin(-1.0);
+} else if ((WDOTN/WMAG) > 1){
+	DEVLOC = asin(1.0);
+}	
+// ref. deviation, required for calculation of off-design conditions. neglected here
+DELTA = 0;//DEVLOC - DEVLOCETAMAX; 
+WPX = WX - WNX;
+WPY = WY - WNY;
+WPZ = WZ - WNZ;
+WPMAG = max(sqrt(WPX*WPX + WPY*WPY + WPZ*WPZ) ,1e-9);
+// get local leading edge coordinate
+double x_le_rot = pow(CC[rotorCells[i]].z(),3)*rotor_le_coeffs_vec[0]+pow(CC[rotorCells[i]].z(),2)*rotor_le_coeffs_vec[1]+CC[rotorCells[i]].z()*rotor_le_coeffs_vec[2]+rotor_le_coeffs_vec[3];
+// calculate local Re number [-] and skin friction coefficient [-]
+REX = rho[rotorCells[i]]*WMAG*(CC[rotorCells[i]].x()-x_le_rot)/mu[rotorCells[i]];
+if (REX < 0){
+	REX = 1e-9;
+}
+CF = 0.0592*pow(REX,-0.2);
+// calculate normal and parallel force
+FP = ((0.5*pow(WMAG,2) *NROT)/(2*PI*RADIUS*max(std::abs(NY) ,1e-9)*blockage[rotorCells[i]])*(2*CF+2*PI*KMACH*pow(DELTA,2)))*rho[rotorCells[i]];
+FN = (0.5*KMACH*DEVLOC *pow(WMAG,2) *NROT)/(RADIUS*max(std::abs(NY) ,1e-9)*blockage[rotorCells[i]])*rho[rotorCells[i]];
+// calculate y-component of body force
+FY = FN*(-cos(DEVLOC)*NY+sin(DEVLOC)*WPY/WPMAG)-FP*WY/WMAG;
+FBFM = OMEGARROT*FY;
+// metal blockage effect
+FB = 1/blockage[rotorCells[i]]*(rho[rotorCells[i]]*et[rotorCells[i]] *U[rotorCells[i]]&gradBlockage[rotorCells[i]]);
+// total energy source term
+FTOTAL[rotorCells[i]] = FBFM+FB;
+if (FTOTAL[rotorCells[i]] > 1e10){
+	FTOTAL[rotorCells[i]] = 1e10;
+}
+}
+}
+// add energy source terms to energy equation
+eqn += FTOTAL;
+#};
+codeConstrain
+#{
+#};
+code
+#{
+$codeInclude
+$codeCorrect
+$codeAddSup
+$codeAddSupRho
+$codeConstrain
+#};
+}
+bodyForceCoeffs
+{
+$scalarCodedSourceCoeffs;
+}
+}
+
+// 2) Continuity
+fanContinuity
+{
+type scalarCodedSource;
+active true;
+name tholletBFMc;
+scalarCodedSourceCoeffs
+{
+selectionMode cellZone;
+cellZone fan;
+fields (rho);
+codeInclude
+#{
+# include <cmath>
+# include <IFstream.H>
+# include <OFstream.H>
+# include "fvc.H"
+#};
+codeCorrect
+#{
+#};
+codeAddSup
+#{
+Pout << "Adding source terms to continuity equation for zones: ";
+
+// define if rotor and/or stator zones are present
+bool rotor {true};
+bool stator {true};
+
+// read fields
+const volVectorField& U = mesh_.lookupObject<volVectorField>("U");
+const volScalarField& blockage = mesh_.lookupObject<volScalarField>("blockage");
+const volScalarField& rho = mesh_.lookupObject<volScalarField>("rho");
+const volVectorField& gradBlockage = mesh_.lookupObject<volVectorField>("blockageGradient");
+// initialize source term field
+volScalarField FTOTAL = mesh_.lookupObject<volScalarField>("rhoR");
+FTOTAL *= 0.0;
+
+// calculate source terms for stator cell zone
+if (stator) {
+Pout << "stator "; 
+label statorZoneID = mesh_.cellZones().findZoneID("stator");
+const labelList& statorCells = mesh_.cellZones()[statorZoneID];
+forAll(statorCells,i)
+{
+// metal blockage effect
+FTOTAL[statorCells[i]] = -1/blockage[statorCells[i]]*(rho[statorCells[i]]*U[statorCells[i]]&gradBlockage[statorCells[i]]);
+if (FTOTAL[statorCells[i]] > 1e10){
+	FTOTAL[statorCells[i]] = 1e10;
+}
+}
+}
+// calculate source terms for rotor cell zone
+if (rotor) {
+Pout << "rotor " << endl; 
+label rotorZoneID = mesh_.cellZones().findZoneID("rotor");
+const labelList& rotorCells = mesh_.cellZones()[rotorZoneID];
+forAll(rotorCells ,i)
+{
+// metal blockage effect
+FTOTAL[rotorCells[i]] = -1/blockage[rotorCells[i]]*(rho[rotorCells[i]]*U[rotorCells[i]]&gradBlockage[rotorCells[i]]);
+if (FTOTAL[rotorCells[i]] > 1e10){
+	FTOTAL[rotorCells[i]] = 1e10;
+}
+}
+}
+// add continuity source terms to continuity equation
+eqn += FTOTAL;
+#};
+codeAddSupRho
+#{
+#};
+codeConstrain
+#{
+#};
+code
+#{
+$codeInclude
+$codeCorrect
+$codeAddSup
+$codeAddSupRho
+$codeConstrain
+#};
+}
+bodyForceCoeffsContinuity
+{
+$scalarCodedSourceCoeffs;
+}
+}
+
+// 3) Momentum
+fanMomentum
+{
+type vectorCodedSource;
+active true;
+name tholletBFMm;
+vectorCodedSourceCoeffs
+{
+selectionMode cellZone;
+cellZone fan;
+fields (U);
+codeInclude
+#{
+# include <cmath>
+# include <IFstream.H>
+# include <OFstream.H>
+# include "fvc.H"
+#};
+codeCorrect
+#{
+#};
+codeAddSup
+#{
+#};
+codeAddSupRho
+#{
+Pout << "Adding source terms to momentum equation for zones: ";
+// define if rotor and/or stator zones are present
+bool rotor {true};
+bool stator {true};
+
+//define constants
+
+
+
+
+const scalar NSTAT = 43; // number of stator blades [-]
+const scalar NROT = 20; // number of rotor blades [-]
+const scalar PI = M_PI; // pi
+
+// read fields
+volVectorField F = mesh_.lookupObject<volVectorField>("F");
+const vectorField& U = eqn.psi();
+const volVectorField& camber = mesh_.lookupObject<volVectorField>("camber");
+const volScalarField& blockage = mesh_.lookupObject<volScalarField>("blockage");
+const volVectorField& blockageGradient = mesh_.lookupObject<volVectorField>("blockageGradient");
+const volScalarField& mu = mesh_.lookupObject<volScalarField>("thermo:mu");
+volScalarField devAngle = mesh_.lookupObject<volScalarField>("devAngle");
+const vectorField& CC = mesh_.C(); //cell center
+const Time& runTime= mesh_.time();
+
+// initialize source term field
+volVectorField FTOTAL = mesh_.lookupObject<volVectorField>("F");
+
+// Initialize scalars
+scalar RADIUS ,OMEGARROT, NX , NY ,NZ , WX ,WY ,WZ ,WMAG , WDOTN ,WNX ,WNY ,WNZ , DEVLOC ,WTX ,WTY ,WTZ ,WTMAG ,TX ,TY ,FN ,FX ,FY ,FZ, FP, MACHREL, KMACH, CF, DELTA, REX, FBX, FBY, FBZ, FTX, FTY, FTZ, WPX, WPY, WPZ, WPMAG;
+scalar alpha, gamma, FX2, FY2, x_le_rot, x_le_stat;
+
+// calculate source terms for stator cell zone
+if (stator) {
+Pout << "stator "; 
+label statorZoneID = mesh_.cellZones().findZoneID("stator");
+const labelList& statorCells = mesh_.cellZones()[statorZoneID];
+forAll(statorCells,i)
+{
+RADIUS = sqrt(pow(CC[statorCells[i]].y(),2)+pow(CC[statorCells[i]].z(),2));
+NX = camber[statorCells[i]].x();
+NY = camber[statorCells[i]].y();
+NZ = camber[statorCells[i]].z();
+WX= U[statorCells[i]].x();
+WY= U[statorCells[i]].y();
+WZ= U[statorCells[i]].z();
+WMAG = sqrt(WX*WX + WY*WY + WZ*WZ);
+MACHREL = std::abs(WMAG)/sos;
+if (MACHREL < 1){
+    KMACH = min(1/sqrt(1-MACHREL*MACHREL),3);
+} else if (MACHREL > 1){
+KMACH = min(4/(2*PI*sqrt(MACHREL*MACHREL-1)),3);
+} else {
+KMACH = 3;
+}
+if (KMACH > 3){
+KMACH = 3;
+}
+WDOTN = WX*NX + WY*NY + WZ*NZ;
+WNX = WDOTN *NX;
+WNY = WDOTN *NY;
+WNZ = WDOTN *NZ;
+DEVLOC = 0.0;
+if (std::abs(WDOTN/WMAG) < 1){
+	DEVLOC = asin( WDOTN / max(WMAG ,1e-9));
+} else if ((WDOTN/WMAG) < -1){
+	DEVLOC = asin(-1.0);
+} else if ((WDOTN/WMAG) > 1){
+	DEVLOC = asin(1.0);
+}
+devAngle[statorCells[i]]=DEVLOC;	
+DELTA = 0;//DEVLOC - DEVLOCETAMAX; // ref. deviation, required for calculation of off-design conditions
+WPX = WX - WNX;
+WPY = WY - WNY;
+WPZ = WZ - WNZ;
+WPMAG = max(sqrt(WPX*WPX + WPY*WPY + WPZ*WPZ) ,1e-9);
+// get local leading edge coordinate
+double x_le_stat = pow(CC[statorCells[i]].z(),3)*stator_le_coeffs_vec[0]+pow(CC[statorCells[i]].z(),2)*stator_le_coeffs_vec[1]+CC[statorCells[i]].z()*stator_le_coeffs_vec[2]+stator_le_coeffs_vec[3];
+REX = rho[statorCells[i]]*WMAG*(CC[statorCells[i]].x()-x_le_stat)/mu[statorCells[i]];
+if (REX < 0){
+	REX = 1e-9;
+}
+CF = 0.0592*pow(REX,-0.2);
+// calculate normal and parallel force
+FP = ((0.5*pow(WMAG,2) *NSTAT)/(2*PI*RADIUS*max(std::abs(NY) ,1e-9)*blockage[statorCells[i]])*(2*CF+2*PI*KMACH*pow(DELTA,2)))*rho[statorCells[i]];
+FN = (0.5*KMACH*DEVLOC *pow(WMAG,2) *NSTAT)/(RADIUS*max(std::abs(NY) ,1e-9)*blockage[statorCells[i]])*rho[statorCells[i]];
+// metal blockage effect
+FX = FN*(-cos(DEVLOC)*NX+sin(DEVLOC)*WPX/WPMAG)-FP*WX/WMAG;
+FY = FN*(-cos(DEVLOC)*NY+sin(DEVLOC)*WPY/WPMAG)-FP*WY/WMAG;
+FZ = FN*(-cos(DEVLOC)*NZ+sin(DEVLOC)*WPZ/WPMAG)-FP*WZ/WMAG;
+// metal blockage effect
+FBX = -1/blockage[statorCells[i]]*(rho[statorCells[i]]*U[statorCells[i]]&blockageGradient[statorCells[i]])*U[statorCells[i]].x();
+FBY = -1/blockage[statorCells[i]]*(rho[statorCells[i]]*U[statorCells[i]]&blockageGradient[statorCells[i]])*U[statorCells[i]].y();
+FBZ = -1/blockage[statorCells[i]]*(rho[statorCells[i]]*U[statorCells[i]]&blockageGradient[statorCells[i]])*U[statorCells[i]].z();
+FTX = FX+FBX;
+FTY = FY+FBY;
+FTZ = FZ+FBZ;
+if (FTX > 1e10){
+	FTX = 1e10;
+}
+if (FTY > 1e10){
+	FTY = 1e10;
+}
+if (FTZ > 1e10){
+	FTZ = 1e10;
+}
+
+
+//Pout <<  CC[statorCells[i]].x() <<  " "  <<  CC[statorCells[i]].z() <<  " "  <<  DEVLOC <<  " " <<  FN <<  " " <<  FP <<  " " <<  FX <<  " " <<  FY <<  " " <<  FZ <<  " " <<  FX2 <<  " " <<  FY2 <<   " " <<  WMAG <<   " " <<  REX <<  " " <<  gamma <<  endl; 
+// total momentum source term
+F[statorCells[i]] = vector( FTX, FTY, FTZ );
+FTOTAL[statorCells[i]] = vector( FTX, FTY, FTZ );
+}
+}
+
+// calculate source terms for rotor cell zone
+if (rotor) {
+Pout << "rotor " << endl; 
+label rotorZoneID = mesh_.cellZones().findZoneID("rotor");
+const labelList& rotorCells = mesh_.cellZones()[rotorZoneID];
+forAll(rotorCells ,i)
+{
+RADIUS = sqrt(pow(CC[rotorCells[i]].y(),2)+pow(CC[rotorCells[i]].z(),2));
+OMEGARROT = OMEGAROT * RADIUS ;
+NX = camber[rotorCells[i]].x();
+NY = camber[rotorCells[i]].y();
+NZ = camber[rotorCells[i]].z();
+WX= U[rotorCells[i]].x();
+WY= U[rotorCells[i]].y() -OMEGARROT;
+WZ= U[rotorCells[i]].z();
+WMAG = sqrt(WX*WX + WY*WY + WZ*WZ);
+MACHREL = std::abs(WMAG)/sos;
+if (MACHREL < 1){
+    KMACH = min(1/sqrt(1-MACHREL*MACHREL),3);
+} else if (MACHREL > 1){
+KMACH = min(4/(2*PI*sqrt(MACHREL*MACHREL-1)),3);
+} else {
+KMACH = 3;
+}
+if (KMACH > 3){
+KMACH = 3;
+}
+WDOTN = WX*NX + WY*NY + WZ*NZ;
+WNX = WDOTN *NX;
+WNY = WDOTN *NY;
+WNZ = WDOTN *NZ;
+DEVLOC = 0.0;
+if (std::abs(WDOTN/WMAG) < 1){
+	DEVLOC = asin( WDOTN / max(WMAG ,1e-9));
+} else if ((WDOTN/WMAG) < -1){
+	DEVLOC = asin(-1.0);
+} else if ((WDOTN/WMAG) > 1){
+	DEVLOC = asin(1.0);
+}
+devAngle[rotorCells[i]]=DEVLOC;	
+DELTA = 0;//DEVLOC - DEVLOCETAMAX; // ref. deviation, required for calculation of off-design conditions
+WPX = WX - WNX;
+WPY = WY - WNY;
+WPZ = WZ - WNZ;
+WPMAG = max(sqrt(WPX*WPX + WPY*WPY + WPZ*WPZ) ,1e-9);
+// get local leading edge coordinate
+double x_le_rot = pow(CC[rotorCells[i]].z(),3)*rotor_le_coeffs_vec[0]+pow(CC[rotorCells[i]].z(),2)*rotor_le_coeffs_vec[1]+CC[rotorCells[i]].z()*rotor_le_coeffs_vec[2]+rotor_le_coeffs_vec[3];
+REX = rho[rotorCells[i]]*WMAG*(CC[rotorCells[i]].x()-x_le_rot)/mu[rotorCells[i]];
+if (REX < 0){
+	REX = 1e-9;
+}
+CF = 0.0592*pow(REX,-0.2);
+// calculate normal and parallel force
+FP = ((0.5*pow(WMAG,2) *NROT)/(2*PI*RADIUS*max(std::abs(NY) ,1e-9)*blockage[rotorCells[i]])*(2*CF+2*PI*KMACH*pow(DELTA,2)))*rho[rotorCells[i]];
+FN = (0.5*KMACH*DEVLOC *pow(WMAG,2) *NROT)/(RADIUS*max(std::abs(NY) ,1e-9)*blockage[rotorCells[i]])*rho[rotorCells[i]];
+FX = FN*(-cos(DEVLOC)*NX+sin(DEVLOC)*WPX/WPMAG)-FP*WX/WMAG;
+FY = FN*(-cos(DEVLOC)*NY+sin(DEVLOC)*WPY/WPMAG)-FP*WY/WMAG;
+FZ = FN*(-cos(DEVLOC)*NZ+sin(DEVLOC)*WPZ/WPMAG)-FP*WZ/WMAG;
+// metal blockage effect
+FBX = -1/blockage[rotorCells[i]]*(rho[rotorCells[i]]*U[rotorCells[i]]&blockageGradient[rotorCells[i]])*U[rotorCells[i]].x();
+FBY = -1/blockage[rotorCells[i]]*(rho[rotorCells[i]]*U[rotorCells[i]]&blockageGradient[rotorCells[i]])*U[rotorCells[i]].y();
+FBZ = -1/blockage[rotorCells[i]]*(rho[rotorCells[i]]*U[rotorCells[i]]&blockageGradient[rotorCells[i]])*U[rotorCells[i]].z();
+FTX = FX+FBX;
+FTY = FY+FBY;
+FTZ = FZ+FBZ;
+
+
+//Pout <<  CC[rotorCells[i]].x() <<  " "  <<  CC[rotorCells[i]].z() <<  " "  <<  DEVLOC <<  " " <<  FN <<  " " <<  FP <<  " " <<  FX <<  " " <<  FY <<  " " <<  FZ <<  " " <<  FX2 <<  " " <<  FY2 <<   " " <<  WMAG <<   " " <<  REX <<  " " <<  gamma <<  endl; 
+if (FTX > 1e10){
+	FTX = 1e10;
+}
+if (FTY > 1e10){
+	FTY = 1e10;
+}
+if (FTZ > 1e10){
+	FTZ = 1e10;
+}
+// total momentum source term
+F[rotorCells[i]] = vector( FTX, FTY, FTZ );
+FTOTAL[rotorCells[i]] = vector( FTX, FTY, FTZ );
+}
+}
+
+// add momentum source terms to momentum equations
+eqn += FTOTAL;
+// write fields
+if(runTime.writeTime()){
+F.write();
+camber.write();
+blockage.write();
+blockageGradient.write();
+devAngle.write();
+}
+#};
+codeConstrain
+#{
+// Pout << "** codeSetValue **" << endl;
+#};
+code
+#{
+$codeInclude
+$codeCorrect
+$codeAddSup
+$codeAddSupRho
+$codeConstrain
+#};
+}
+bodyForceCoeffsMomentum
+{
+$vectorCodedSourceCoeffs;
+}
+}
+

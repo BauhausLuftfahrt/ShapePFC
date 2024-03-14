@@ -1,0 +1,121 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|                                                                             |
+|    HiSA: High Speed Aerodynamic solver                                      |
+|    Copyright (C) 2014-2017 Johan Heyns - CSIR, South Africa                 |
+|    Copyright (C) 2014-2017 Oliver Oxtoby - CSIR, South Africa               |
+|                                                                             |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include          "include/freestreamConditions"
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform $U;
+
+boundaryField
+{
+    inlet
+    {
+        type            codedFixedValue;
+        value           $internalField;
+	name		interfaceVelocity;
+
+code
+#{
+namespace py = pybind11;
+using namespace pybind11::literals;
+try{
+py::initialize_interpreter();}
+catch(...){}
+const fvPatch& boundaryPatch = patch();
+py::object scope_ = py::module_::import("__main__").attr("__dict__");
+py::eval_file("python_funs.py", scope_);
+vectorField& field =* this;
+forAll(boundaryPatch, faceI)
+{
+const scalar z_orig = boundaryPatch.Cf()[faceI].z();
+scope_["z_orig"] = z_orig;
+py::exec("u_py = interface_u(z_orig)", scope_);
+py::array_t<double> u_py_arr = scope_["u_py"].cast<py::array_t<double>>();
+auto u_py = u_py_arr.data();
+field[faceI] = vector(u_py[0], 0., u_py[2]);
+}
+//py::finalize_interpreter();
+#};
+codeInclude
+#{
+# include "fvCFD.H"
+# include <IFstream.H>
+# include <OFstream.H>
+# include <ctime>
+# include "clock.H"
+# include "string.H"
+# include <sstream>
+# include <iomanip>
+# include <cmath>
+# include <iostream>
+# include <vector>
+# include "Python.h"
+# include "pybind11/pybind11.h"
+# include "pybind11/eval.h"
+# include "pybind11/embed.h"
+# include "pybind11/numpy.h"
+# include "pybind11/stl.h"
+#};
+codeOptions
+#{
+-Wno-old-style-cast \
+-I$(LIB_SRC)/finiteVolume/lnInclude \
+-I$(LIB_SRC)/meshTools/lnInclude \
+-I//home/anais/.local/lib/python3.5/site-packages/pybind11/include \
+-I/usr/include/python3.5m
+#};
+codeLibs
+#{
+-lmeshTools \
+-lfiniteVolume \
+-lpython3.5m 
+#};
+}
+    outlet
+    {
+        type            characteristicFarfieldVelocity;
+		#include      	"include/freestreamConditions"
+        value           $internalField; 
+    }
+    atmosphere
+    {
+        type            characteristicFarfieldVelocity;  
+		#include       	"include/freestreamConditions"
+        value           $internalField; 
+    }
+     "nac_.*"
+    {
+		
+       	type            boundaryCorrectedFixedValue;  
+		value			uniform (0 0 0);
+    }
+    "fuse_.*"
+    {
+		
+       	type            boundaryCorrectedFixedValue;  
+		value			uniform (0 0 0);
+    }	
+    wedge_left
+    {
+		type 		    wedge;
+    }	
+    wedge_right
+    {
+	    type 		    wedge;
+    }
+}
+// ************************************************************************* //

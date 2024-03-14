@@ -1,0 +1,40 @@
+#!/bin/bash
+cd "${0%/*}" || exit
+source /home/anais/OpenFOAM-v2206/etc/bashrc
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+rm -r log.*
+rm -r processor*
+cp controlvars1 system/include/controlvars
+cp fvSchemes1 system/fvSchemes
+cp fvSolution1 system/fvSolution
+
+./Mesh
+
+./Run
+
+cp controlvars2 system/include/controlvars
+cp fvOptions system/fvOptions
+
+cp 0/fanBCs/F 5/F
+cp 0/fanBCs/blockage 5/blockage
+cp 0/fanBCs/blockageGradient 5/blockageGradient
+cp 0/fanBCs/camber 5/camber
+
+./Presim
+
+rm -r processor*
+rm -r log.decomposePar
+rm -r log.reconstructPar
+cp controlvars3 system/include/controlvars
+
+./Run
+
+rm -r processor*
+rm -r log.decomposePar
+rm -r log.reconstructPar
+cp controlvars4 system/include/controlvars
+cp fvSchemes2 system/fvSchemes
+cp fvSolution2 system/fvSolution
+
+./Run

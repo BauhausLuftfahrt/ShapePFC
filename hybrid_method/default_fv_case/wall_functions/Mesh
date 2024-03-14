@@ -1,0 +1,18 @@
+#!/bin/bash
+cd "${0%/*}" || exit
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+
+/home/anais/.local/bin/gmsh -3 -format msh2 gmsh_coords.geo
+
+gmshToFoam gmsh_coords.msh
+
+extrudeMesh
+
+changeDictionary -constant
+
+createPatch -overwrite
+
+transformPoints -rollPitchYaw "(90 0 0)"
+
+topoSet
+

@@ -1,0 +1,9 @@
+#!/bin/bash
+cd "${0%/*}" || exit
+source /home/anais/OpenFOAM-v2206/etc/bashrc
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+
+rm -r processor*
+rm -r log.decomposePar
+rm -r log.reconstructPar
+rm -r log.hisa

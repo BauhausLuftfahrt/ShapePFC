@@ -1,0 +1,72 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|                                                                             |
+|    HiSA: High Speed Aerodynamic solver                                      |
+|    Copyright (C) 2014-2017 Johan Heyns - CSIR, South Africa                 |
+|    Copyright (C) 2014-2017 Oliver Oxtoby - CSIR, South Africa               |
+|                                                                             |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      nut;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "include/freestreamConditions"
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform $nue_t;
+
+boundaryField
+{
+    inlet
+    {
+        	type            calculated;
+        	value           $internalField;
+    }
+    outlet
+    {
+        	type            calculated;
+        	value           $internalField;
+    }
+     atmosphere
+    {
+        	type            calculated;
+        	value           $internalField;
+    }
+     "nac_.*"
+    {
+        	type            boundaryCorrectedFixedValue; 
+        	value 			$internalField;
+    }
+
+    "fuse_.*"
+    {
+        	type            boundaryCorrectedFixedValue; 
+        	value 			$internalField;
+    }
+    fanInlet
+    {
+        	type            calculated;
+        	value           $internalField;
+    }
+    fanOutlet 
+    {
+        	type            calculated;
+        	value           $internalField;
+    }    
+    wedge_left
+    {
+			type 		    wedge;
+    }
+	
+    wedge_right
+    {
+			type 		    wedge;
+    }
+}
+
+// ************************************************************************* //

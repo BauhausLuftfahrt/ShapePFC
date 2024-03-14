@@ -1,0 +1,85 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  4.x                                   |
+|   \\  /    A nd           | Web:      www.OpenFOAM.org                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      changeDictionaryDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+boundary
+{
+    nac_cowling
+    {
+        type wall;
+    }
+    nac_inlet
+    {
+        type wall;
+    }
+    nac_rotor
+    {
+        type wall;
+    }
+    nac_gap
+    {
+        type wall;
+    }
+    nac_stator
+    {
+        type wall;
+    }
+    nac_nozzle
+    {
+        type wall;
+    }
+    fuse_center
+    {
+        type wall;
+    }
+    fuse_sweep
+    {
+        type wall;
+    }
+    fuse_hub_inlet
+    {
+        type wall;
+    }
+    fuse_hub_rotor
+    {
+        type wall;
+    }
+    fuse_hub_gap
+    {
+        type wall;
+    }
+    fuse_hub_stator
+    {
+        type wall;
+    }
+    fuse_hub_nozzle
+    {
+        type wall;
+    }
+    fuse_tail
+    {
+        type wall;
+    }
+    wedge_left
+    {
+        type wedge;
+    }
+    wedge_right
+    {
+        type wedge;
+    }
+}
+
+// ************************************************************************* //

@@ -1,0 +1,143 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2206                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+version 2.0;
+format ascii ;
+class volScalarField ;
+location "0";
+object blockage;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+dimensions [0 0 0 0 0 0 0];
+internalField #codeStream
+{
+codeInclude
+#{
+# include "fvCFD.H"
+# include <IFstream.H>
+# include <OFstream.H>
+# include <ctime>
+# include "clock.H"
+# include "string.H"
+# include <sstream>
+# include <iomanip>
+# include <cmath>
+# include <iostream>
+# include <vector>
+# include "Python.h"
+# include "pybind11/pybind11.h"
+# include "pybind11/eval.h"
+# include "pybind11/embed.h"
+# include "pybind11/numpy.h"
+# include "pybind11/stl.h"
+#};
+codeOptions
+#{
+-Wno-old-style-cast \
+-I$(LIB_SRC)/finiteVolume/lnInclude \
+-I$(LIB_SRC)/meshTools/lnInclude \
+-I//home/anais/.local/lib/python3.5/site-packages/pybind11/include \
+-I/usr/include/python3.5m
+#};
+codeLibs
+#{
+-lmeshTools \
+-lfiniteVolume \
+-lpython3.5m 
+#};
+code
+#{
+const IOdictionary & d = static_cast < const IOdictionary &>(dict);
+const fvMesh& mesh = refCast < const fvMesh >(d.db());
+label fanZoneID = mesh.cellZones().findZoneID("fan");
+const labelList& fanCells = mesh.cellZones()[fanZoneID];
+scalarField blockage(mesh.nCells(), 0);
+List <vector> blockage_data;
+IFstream bl("blockage_data");
+bl >> blockage_data;
+
+const vectorField& C = mesh.C();
+const Foam::Vector<scalar>* CData = C.cdata();
+const long CAddress = reinterpret_cast<long>(CData);
+
+std::vector<double> x_orig;
+std::vector<double> z_orig;
+std::vector<double> bl_orig;
+
+for (int i = 0; i < blockage_data.size(); i++) {
+	x_orig.push_back(blockage_data[i][0]);
+        z_orig.push_back(blockage_data[i][1]);
+        bl_orig.push_back(blockage_data[i][2]);
+}
+
+namespace py = pybind11;
+using namespace pybind11::literals;
+py::object scope_ = py::module_::import("__main__").attr("__dict__");
+py::eval_file("python_funs.py", scope_);
+scope_["CAddress"] = CAddress;
+scope_["SIZE"] = C.size();
+py::array_t<double> x_orig_py(x_orig.size(), x_orig.data());
+py::array_t<double> z_orig_py(z_orig.size(), z_orig.data());
+py::array_t<double> bl_orig_py(bl_orig.size(), bl_orig.data());
+
+scope_["x_orig"] = x_orig;
+scope_["y_orig"] = z_orig;
+scope_["z_orig"] = bl_orig;
+scope_["fillv"] = 1.0;
+
+py::exec("z_py = interp_lin2d(x_orig, y_orig, z_orig, fillv)", scope_);
+py::array_t<double> bl_py_arr = scope_["z_py"].cast<py::array_t<double>>();
+auto bl_py = bl_py_arr.data();
+
+
+forAll(blockage, i)
+{
+if (std::find(fanCells.begin(), fanCells.end(), i) != fanCells.end()) {
+	if (bl_py[i] > 1){
+	blockage[i] = 1;
+	}
+	else{
+	blockage[i] = bl_py[i];
+}
+}
+else{			
+	blockage[i] = 1; // ensure that rest of field is NOT 0, but 1 (does not work by initialization of field)
+}
+}
+
+blockage.writeEntry("", os);
+//py::finalize_interpreter();
+#};
+};
+boundaryField
+{
+"nac_.*"
+{
+type zeroGradient;
+}
+"fuse_.*"
+{
+type zeroGradient;
+}
+"(inlet|atmosphere)"
+{
+type fixedValue ;
+value uniform 1;
+}
+outlet
+{
+type zeroGradient ;
+}
+"(wedge_left|wedge_right)"
+{
+type            wedge;
+}
+}
+
+// ************************************************************************* //

@@ -1,0 +1,9 @@
+#!/bin/bash
+cd "${0%/*}" || exit
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+
+runApplication decomposePar -force
+
+mpirun -np 32 --cpu-set 0-31 hisa -parallel
+
+runApplication reconstructPar -latestTime

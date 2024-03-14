@@ -1,0 +1,185 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2206                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+version 2.0;
+format ascii ;
+class volVectorField ;
+location "0";
+object camber ;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+dimensions [0 0 0 0 0 0 0];
+internalField #codeStream
+{
+codeInclude
+#{
+# include "fvCFD.H"
+# include <IFstream.H>
+# include <OFstream.H>
+# include <ctime>
+# include "clock.H"
+# include "string.H"
+# include <sstream>
+# include <iomanip>
+# include <cmath>
+# include <iostream>
+# include <vector>
+# include "Python.h"
+# include "pybind11/pybind11.h"
+# include "pybind11/eval.h"
+# include "pybind11/embed.h"
+# include "pybind11/numpy.h"
+# include "pybind11/stl.h"
+#};
+codeOptions
+#{
+-Wno-old-style-cast \
+-I$(LIB_SRC)/finiteVolume/lnInclude \
+-I$(LIB_SRC)/meshTools/lnInclude \
+-I//home/anais/.local/lib/python3.5/site-packages/pybind11/include \
+-I/usr/include/python3.5m
+#};
+codeLibs
+#{
+-lmeshTools \
+-lfiniteVolume \
+-lpython3.5m 
+#};
+code
+#{
+const IOdictionary & d = static_cast < const IOdictionary &>(dict);
+const fvMesh& mesh = refCast < const fvMesh >(d.db());
+label fanZoneID = mesh.cellZones().findZoneID("fan");
+const labelList& fanCells = mesh.cellZones()[fanZoneID];
+vectorField camber(mesh.nCells() , vector(0,0,0));
+List <vector > nx_data , nth_data , nr_data;
+scalar nx_fin, nth_fin, nr_fin;
+IFstream nx("nx_data");
+nx >> nx_data;
+IFstream nth("nth_data");
+nth >> nth_data;
+IFstream nr("nr_data");
+nr >> nr_data;
+
+const vectorField& C = mesh.C();
+const Foam::Vector<scalar>* CData = C.cdata();
+const long CAddress = reinterpret_cast<long>(CData);
+
+std::vector<double> x_orig;
+std::vector<double> z_orig;
+std::vector<double> nx_orig;
+std::vector<double> nth_orig;
+std::vector<double> nr_orig;
+
+for (int i = 0; i < nx_data.size(); i++) {
+	x_orig.push_back(nx_data[i][0]);
+        z_orig.push_back(nx_data[i][1]);
+        nx_orig.push_back(nx_data[i][2]);
+        nth_orig.push_back(nth_data[i][2]);
+        nr_orig.push_back(nr_data[i][2]);
+}
+
+namespace py = pybind11;
+using namespace pybind11::literals;
+try{
+py::initialize_interpreter();}
+catch(...){}
+py::object scope_ = py::module_::import("__main__").attr("__dict__");
+py::eval_file("python_funs.py", scope_);
+scope_["CAddress"] = CAddress;
+scope_["SIZE"] = C.size();
+py::array_t<double> x_orig_py(x_orig.size(), x_orig.data());
+py::array_t<double> z_orig_py(z_orig.size(), z_orig.data());
+py::array_t<double> nx_orig_py(nx_orig.size(), nx_orig.data());
+py::array_t<double> nth_orig_py(nth_orig.size(), nth_orig.data());
+py::array_t<double> nr_orig_py(nr_orig.size(), nr_orig.data());
+
+scope_["x_orig"] = x_orig;
+scope_["y_orig"] = z_orig;
+scope_["fillv"] = 0.0;
+scope_["nx_orig"] = nx_orig;
+scope_["nth_orig"] = nth_orig;
+scope_["nr_orig"] = nr_orig;
+
+py::exec("nx_py = interp_lin2d(x_orig, y_orig, nx_orig, fillv)", scope_);
+py::array_t<double> nx_py_arr = scope_["nx_py"].cast<py::array_t<double>>();
+auto nx_py = nx_py_arr.data();
+
+py::exec("nr_py = interp_lin2d(x_orig, y_orig, nr_orig, fillv)", scope_);
+py::array_t<double> nr_py_arr = scope_["nr_py"].cast<py::array_t<double>>();
+auto nr_py = nr_py_arr.data();
+
+py::exec("nth_py = interp_lin2d(x_orig, y_orig, nth_orig, fillv)", scope_);
+py::array_t<double> nth_py_arr = scope_["nth_py"].cast<py::array_t<double>>();
+auto nth_py = nth_py_arr.data();
+
+forAll(camber , i)
+{
+if (std::find(fanCells.begin(), fanCells.end(), i) != fanCells.end()) {
+	if (nx_py[i] > 1.0){
+		nx_fin = 1.0;
+	}	
+	else if (nx_py[i] < -1.0){
+		nx_fin = -1.0;
+	}
+	else {	
+		nx_fin = nx_py[i];
+	}
+	if (nth_py[i] > 1.0){
+		nth_fin= 1.0;
+	}	
+	else if (nth_py[i] < -1.0){
+		nth_fin = -1.0;
+	}
+	else {	
+		nth_fin = nth_py[i];
+	}
+	if (nr_py[i] > 1.0){
+		nr_fin= 1.0;
+	}	
+	else if (nr_py[i] < -1.0){
+		nr_fin = -1.0;
+	}
+	else {	
+		nr_fin = nr_py[i];
+	}
+camber[i] = vector(nx_fin, nth_fin, nr_fin);
+}
+else{
+camber[i] = vector(0.0 , 0.0 , 0.0);
+}
+}
+camber.writeEntry("", os);
+#};
+};
+boundaryField
+{
+"nac_.*"
+{
+type zeroGradient;
+}
+"fuse_.*"
+{
+type zeroGradient;
+}
+"(inlet|atmosphere)"
+{
+type zeroGradient;
+}
+outlet
+{
+type zeroGradient ;
+}
+"(wedge_left|wedge_right)"
+{
+type            wedge;
+}
+}
+
+// ************************************************************************* //
